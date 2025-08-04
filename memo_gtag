@@ -1,0 +1,207 @@
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as cp from 'child_process';
+
+export function activate(context: vscode.ExtensionContext) {
+  const jumpHistory: { uri: vscode.Uri, position: vscode.Position, viewColumn: vscode.ViewColumn | undefined }[] = [];
+
+  let jumpRightDisposable = vscode.commands.registerCommand('gtags.jumpRight', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+
+    jumpHistory.push({
+      uri: editor.document.uri,
+      position: editor.selection.active,
+      viewColumn: editor.viewColumn
+    });
+
+    const selection = editor.selection;
+    const word = editor.document.getText(selection.isEmpty
+      ? editor.document.getWordRangeAtPosition(selection.active)
+      : selection);
+
+    if (!word) {
+      vscode.window.showInformationMessage("No word selected.");
+      return;
+    }
+
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage("No workspace folder open.");
+      return;
+    }
+
+    const gtagsFiles = ['GTAGS', 'GRTAGS', 'GPATH'].map(f => path.join(workspaceRoot, f));
+    if (!gtagsFiles.every(f => fs.existsSync(f))) {
+      vscode.window.showErrorMessage("Gtags files not found. Run gtags to generate them.");
+      return;
+    }
+
+    let output: string;
+    try {
+      output = cp.execSync(`global -x ${word}`, { cwd: workspaceRoot }).toString();
+    } catch (e) {
+      vscode.window.showInformationMessage(`Tag not found: ${word}`);
+      return;
+    }
+
+    const lines = output.trim().split('\n').filter(Boolean);
+    if (lines.length === 0) {
+      vscode.window.showInformationMessage(`No definitions found for: ${word}`);
+      return;
+    }
+
+    type Definition = { file: string, line: number, code: string };
+
+    const definitions: Definition[] = lines.map(line => {
+      const parts = line.trim().split(/\s+/);
+      const [symbol, lineStr, file] = [parts[0], parts[1], parts[2]];
+      const code = parts.slice(3).join(' ');
+      return {
+        file,
+        line: parseInt(lineStr, 10) - 1,
+        code
+      };
+    });
+
+    let chosen: Definition;
+    if (definitions.length === 1) {
+      chosen = definitions[0];
+    } else {
+      const picked = await vscode.window.showQuickPick(
+        definitions.map(d => ({
+          label: `${d.file}:${d.line + 1} ${d.code}`,
+          description: '',
+          detail: '',
+          target: d
+        })),
+        { placeHolder: `${word} の定義を選択` }
+      );
+      if (!picked) return;
+      chosen = picked.target;
+    }
+
+    const targetPath = path.join(workspaceRoot, chosen.file);
+    const doc = await vscode.workspace.openTextDocument(targetPath);
+    await vscode.window.showTextDocument(doc, {
+      viewColumn: vscode.ViewColumn.Two,
+      preserveFocus: false,
+      selection: new vscode.Range(chosen.line, 0, chosen.line, 0),
+      preview: false
+    });
+  });
+
+  let jumpBackDisposable = vscode.commands.registerCommand('gtags.jumpBack', async () => {
+    if (jumpHistory.length === 0) {
+      vscode.window.showInformationMessage("No previous location in history.");
+      return;
+    }
+
+    const last = jumpHistory.pop()!;
+    const doc = await vscode.workspace.openTextDocument(last.uri);
+    await vscode.window.showTextDocument(doc, {
+      viewColumn: last.viewColumn ?? vscode.ViewColumn.One,
+      selection: new vscode.Range(last.position, last.position),
+      preview: false
+    });
+  });
+
+  let updateTagsDisposable = vscode.commands.registerCommand('gtags.updateTags', () => {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage("No workspace folder open.");
+      return;
+    }
+
+    let terminal = vscode.window.terminals.find(t => t.name === "GTags Generate");
+    if (!terminal) {
+      terminal = vscode.window.createTerminal({
+        name: "GTags Generate",
+        cwd: workspaceRoot
+      });
+    }
+
+    terminal.show(true);
+    terminal.sendText('gtags');
+  });
+
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.text = '$(sync) GTags 更新';
+  statusBarItem.tooltip = 'gtags を再生成します';
+  statusBarItem.command = 'gtags.updateTags';
+  statusBarItem.show();
+
+  context.subscriptions.push(
+    jumpRightDisposable,
+    jumpBackDisposable,
+    updateTagsDisposable,
+    statusBarItem
+  );
+}
+
+export function deactivate() {}
+
+
+
+
+
+{
+  "name": "gtags-hopper",
+  "displayName": "GTags Hopper",
+  "icon": "icon.png",
+  "description": "Jump to definition using GNU Global (gtags) and open in right editor column",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.56.0"
+  },
+  "activationEvents": [
+    "onCommand:gtags.jumpRight",
+    "onCommand:gtags.jumpBack",
+    "onCommand:gtags.updateTags"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gtags.jumpRight",
+        "title": "GTags: Jump to Definition (Right)"
+      },
+      {
+        "command": "gtags.jumpBack",
+        "title": "GTags: Jump Back"
+      },
+      {
+        "command": "gtags.updateTags",
+        "title": "GTags: Update Tags"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "gtags.jumpRight",
+        "key": "ctrl+alt+u",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "gtags.jumpBack",
+        "key": "ctrl+alt+b",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "gtags.updateTags",
+        "key": "ctrl+alt+t",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "tsc -p ./",
+    "compile": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "@types/vscode": "^1.102.0",
+    "typescript": "^4.9.5",
+    "vscode": "^1.1.37"
+  }
+}
