@@ -1,0 +1,58 @@
+{
+  "name": "ctags-hopper",
+  "displayName": "CTags Hopper",
+  "icon": "icon.png",
+  "description": "Jump to definition using ctags and open in right editor column",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.56.0"
+  },
+  "activationEvents": [
+    "onCommand:ctags.jumpRight",
+    "onCommand:ctags.jumpBack",
+    "onCommand:ctags.updateTags"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ctags.jumpRight",
+        "title": "CTags: Jump to Definition (Right)"
+      },
+      {
+        "command": "ctags.jumpBack",
+        "title": "CTags: Jump Back"
+      },
+      {
+        "command": "ctags.updateTags",
+        "title": "CTags: Update Tags"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ctags.jumpRight",
+        "key": "ctrl+alt+u",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ctags.jumpBack",
+        "key": "ctrl+alt+b",
+        "when": "editorTextFocus"
+      },{
+        "command": "ctags.updateTags",
+        "key": "ctrl+alt+t",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "tsc -p ./",
+    "compile": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "@types/vscode": "^1.102.0",
+    "typescript": "^4.9.5",
+    "vscode": "^1.1.37"
+  }
+}
